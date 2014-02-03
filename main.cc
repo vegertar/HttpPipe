@@ -83,7 +83,7 @@ class PostHeader : public v::Header {
     }
   }
 
-  const char * Generate(long content_length, long *header_size) {
+  const char * Generate(size_t body_size, size_t *head_size) {
     if (!content_length_offset_) {
       const char *pattern = "POST %s HTTP/1.1\r\n"
                             "Accept: */*\r\n"
@@ -99,10 +99,10 @@ class PostHeader : public v::Header {
 
     int i = snprintf(buffer_ + content_length_offset_,
                      sizeof(buffer_) - content_length_offset_,
-                     "%ld\r\n\r\n", content_length);
-    if (header_size) {
-      *header_size = content_length_offset_ + i;
-      VERBOSE(Header-Size, "%ld\n", *header_size);
+                     "%zu\r\n\r\n", body_size);
+    if (head_size) {
+      *head_size = content_length_offset_ + i;
+      VERBOSE(Header-Size, "%zu\n", *head_size);
     }
 
     VERBOSE(HTTP-POST-Header, "\n%s", buffer_);

@@ -21,7 +21,7 @@ release:
 build: $(TARGET)
 
 clean:
-	rm $(TARGET) *.o
+	-rm $(TARGET) *.o
 
 run:
 	./$(TARGET) -V -d $(URL) $(ARGS)

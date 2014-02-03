@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <vector>
 
+#define MAX_QUERY  2048
+
 namespace v {
 
 using std::vector;
@@ -19,7 +21,7 @@ class Header {
                           const char *uri,
                           const char *ver) = 0;
   virtual void SetField(const char *field, const char *value) = 0;
-  virtual const char * Generate(long content_length, long *header_length) = 0;
+  virtual const char * Generate(size_t body_size, size_t *head_size) = 0;
 };
 
 class HttpPipe {
@@ -44,6 +46,7 @@ class HttpPipe {
   enum HttpState { HTTP_HEAD, HTTP_BODY };
   enum HttpFlow { HTTP_REQUEST, HTTP_RESPONSE };
 
+  int CheckTransfer(int *idle_transfer_n);
   ssize_t ReadInput(int fd);
   ssize_t SendRequest(int fd, bool *finished);
   ssize_t SendHead(int fd, size_t n);
@@ -58,10 +61,11 @@ class HttpPipe {
   void HandleHttpRequest(struct pollfd *pfd);
   void HandleHttpResponse(struct pollfd *pfd);
   void HandleError(struct pollfd *pfd, int *connect_retry);
-  int CheckTransfer(int *idle_transfer_n);
+  void Rollback();
 
   vector<char> inbuf_;
-  vector<char> outbuf_;  // also for receive http response
+  vector<char> outbuf_;  // also for receiving http response
+  vector<char> hdrbuf_;
 
   int buffer_size_;
   int connect_retry_;
@@ -72,9 +76,11 @@ class HttpPipe {
   Header *header_;
 
   size_t in_offset_;
-  size_t in_length_;
+  size_t in_length_;  // available data to transfer
   size_t out_offset_;
-  size_t out_length_;
+  size_t out_length_;  // data being transfer
+  size_t hdr_offset_;
+  size_t hdr_length_;
   size_t content_length_;
 
   int infd_;
