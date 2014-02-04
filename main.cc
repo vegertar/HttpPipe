@@ -1,4 +1,5 @@
 // main.cc
+// Copyright 2014 <Vegertar, vegertar@gmail.com>
 
 #include <assert.h>
 #include <err.h>
@@ -23,7 +24,7 @@
 #define VERBOSE(field, ...) do { \
   if (enable_verbose) \
     printf("- \033[32m" #field "\033[0m: " __VA_ARGS__); \
-} while(0)
+} while (0)
 
 namespace {
 
@@ -45,9 +46,9 @@ size_t zip_level = 0;                  // disable
 inline void Usage();
 inline void Version();
 const char * GetMacAddress();
-long ParseSize(const char *s);
-long ParseRate(const char *s);
-long ParseInterval(const char *s);
+size_t ParseSize(const char *s);
+size_t ParseRate(const char *s);
+size_t ParseInterval(const char *s);
 void ParseOptions(int argc, char *argv[]);
 void SignalHandler(int signo);
 
@@ -189,7 +190,7 @@ const char * GetMacAddress() {
     struct ifreq *it = ifc.ifc_req;
     struct ifreq *end = it + (ifc.ifc_len / sizeof(struct ifreq));
     for (; it != end; ++it) {
-      strcpy(ifr.ifr_name, it->ifr_name);
+      snprintf(ifr.ifr_name, IFNAMESIZ, "%s", it->ifr_name);
       if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
         if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
           if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
@@ -208,11 +209,11 @@ const char * GetMacAddress() {
 #elif defined __APPLE__
     struct ifaddrs *ifap, *ifaptr;
     if (getifaddrs(&ifap) == 0) {
-      for(ifaptr = ifap; ifaptr != NULL; ifaptr = (ifaptr)->ifa_next) {
-        if (((ifaptr)->ifa_addr)->sa_family == AF_LINK &&
+      for (ifaptr = ifap; ifaptr != NULL; ifaptr = ifaptr->ifa_next) {
+        if ((ifaptr->ifa_addr)->sa_family == AF_LINK &&
             (ifaptr->ifa_flags & IFF_BROADCAST)) {
           unsigned char *from = (unsigned char *)LLADDR((struct sockaddr_dl *)
-                                                        (ifaptr)->ifa_addr);
+                                                        ifaptr->ifa_addr);
           char *to = mac_address;
           for (int i = 0, n = 0; i < 6; ++i)
             n += snprintf(to + n, sizeof(mac_address) - n, "%02x", from[i]);
@@ -224,11 +225,11 @@ const char * GetMacAddress() {
 #endif
   }
 
-  VERBOSE(MAC-address, "%s\n", mac_address);
+  VERBOSE(MAC-Address, "%s\n", mac_address);
   return mac_address;
 }
 
-long ParseSize(const char *s) {
+size_t ParseSize(const char *s) {
   errno = 0;
 
   char *endptr;
@@ -255,7 +256,7 @@ long ParseSize(const char *s) {
   return value;
 }
 
-long ParseRate(const char *s) {
+size_t ParseRate(const char *s) {
   errno = 0;
 
   char *endptr;
@@ -282,7 +283,7 @@ long ParseRate(const char *s) {
   return value;
 }
 
-long ParseInterval(const char *s) {
+size_t ParseInterval(const char *s) {
   errno = 0;
 
   char *endptr;
@@ -362,14 +363,14 @@ void ParseOptions(int argc, char *argv[]) {
 
   VERBOSE(Zip-Level, "%zu\n", zip_level);
   VERBOSE(Destination, "%s\n", destination);
-  VERBOSE(Buffer-size, "%zu(bytes)\n", buffer_size);
+  VERBOSE(Buffer-Size, "%zu(bytes)\n", buffer_size);
   VERBOSE(Transfer-Rate, "%zu(bytes/s)\n", transfer_rate);
   VERBOSE(Connect-Retry, "%zu(times)\n", connect_retry);
   VERBOSE(Idle-Transfer-Interval, "%zu(sec)\n", idle_transfer_interval);
   VERBOSE(Idle-Transfer-Limit, "%zu(times)\n", idle_transfer_limit);
 }
 
-void SignalHandler(int) {
+void SignalHandler(int signo) {
   quit_program = true;
 }
 

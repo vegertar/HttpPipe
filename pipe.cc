@@ -1,4 +1,5 @@
 // pipe.cc
+// Copyright 2014 <Vegertar, vegertar@gmail.com>
 
 #include "pipe.h"
 
@@ -21,16 +22,15 @@
 #include <algorithm>
 
 #define ILLEGAL(n)  (n < 0 && errno != EINTR && errno != EAGAIN)
-#define RESETFD(fd) do { close(fd); fd = -1; } while(0)
+#define RESETFD(fd) do { close(fd); fd = -1; } while (0)
 
+using std::max;
 using std::min;
 using std::vector;
 
 namespace {
 
-static bool stop_flag;
-
-inline useconds_t GetNowTime() {
+inline useconds_t GetTime() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return tv.tv_sec * 1000000 + tv.tv_usec;
@@ -43,7 +43,7 @@ inline void NonBlocking(int fd, int on) {
 
 bool ZipCompress(int level, vector<char> *buffer, size_t *n) {
   static vector<char> zbuffer;
-  size_t zn = buffer->capacity();
+  size_t zn = max(buffer->capacity(), compressBound(*n));
   zbuffer.reserve(zn);
 
   int res = compress2((unsigned char *)(zbuffer.data()), &zn,
@@ -72,8 +72,10 @@ int TcpNonBlockConnect(const char *host, const char *serv) {
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
-  if ((rv = getaddrinfo(host, serv, &hints, &servinfo)) != 0)
-    errx(1, "%s: getaddrinfo() error: %s", __func__, gai_strerror(rv));
+  if ((rv = getaddrinfo(host, serv, &hints, &servinfo)) != 0) {
+    warnx("%s: getaddrinfo() error: %s", __func__, gai_strerror(rv));
+    return -1;
+  }
 
   for (p = servinfo; p != NULL; p = p->ai_next) {
     if ((s = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
@@ -105,7 +107,7 @@ HttpPipe::HttpPipe()
     : buffer_size_(2097152),  // 2M
       connect_retry_(3),
       idle_transfer_(3),
-      stop_flag_(&stop_flag),
+      stop_flag_(NULL),
       transfer_rate_(100000),  // 100K
       zip_level_(0),  // disable
       header_(NULL),
@@ -116,15 +118,15 @@ HttpPipe::HttpPipe()
       hdr_offset_(0),
       hdr_length_(0),
       content_length_(0),
+      content_length_backup_(0),
       infd_(STDIN_FILENO),
       host_(),
       port_(),
       path_(),
-      connected_(false),
       request_state_(HTTP_HEAD),
       response_state_(HTTP_HEAD),
       http_flow_(HTTP_REQUEST) {
-  // empty      
+  // empty
 }
 
 void HttpPipe::Init(int infd, const char *outurl) {
@@ -148,15 +150,16 @@ void HttpPipe::Serve(int timeout) {
   int delay = 0;
   int interval = timeout;
 
-  while (!*stop_flag_) {
-    if (retry >= connect_retry_)
+  while (!stop_flag_ || !*stop_flag_) {
+    if (retry > connect_retry_)
       break;
 
     int status = CheckTransfer(&idle);
     if (status == -1 && fds[0].fd == -1)
       break;
 
-    SetOutput(status == 1, &fds[1]);
+    if (!SetOutput(status == 1, &fds[1]))
+      ++retry;
 
     time_t before = time(NULL);
     int res = poll(fds, 2, interval * 1000);
@@ -167,8 +170,10 @@ void HttpPipe::Serve(int timeout) {
     } else if (res < 0 && errno != EINTR) {
       err(1, "%s: poll() error", __func__);
     } else if (res > 0) {
-      HandleError(&fds[1], &retry);
-      HandleOutput(&fds[1], &retry);
+      if (HandleError(&fds[1]))
+        ++retry;
+      if (HandleOutput(&fds[1]))
+        retry = 0;
       HandleInput(&fds[0]);
     }
 
@@ -278,7 +283,7 @@ ssize_t HttpPipe::SendRequest(int fd, bool *finished) {
 
   if (content_length_ == 0) {
     n = transfer_rate_ ?
-        min<long>(transfer_rate_, in_length_ - out_offset_) :
+        min<size_t>(transfer_rate_, in_length_ - out_offset_) :
         in_length_ - out_offset_;
 
     if (zip_level_ > 0) {
@@ -292,7 +297,7 @@ ssize_t HttpPipe::SendRequest(int fd, bool *finished) {
              header_->Generate(n, &hdr_length_));
     hdr_offset_ = 0;
     out_length_ = out_offset_ + n;
-    content_length_ = n;
+    content_length_backup_ = content_length_ = n;
   } else {
     n = out_length_ - out_offset_;
   }
@@ -351,7 +356,13 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
     res = GetHead(fd);
     if (res <= 0)
       goto finish;
+
     const char *p = hdrbuf_.data();
+
+    int status;
+    if (sscanf(p, "%*s%d", &status) == 1 && status / 100 != 2)
+      warnx("HTTP response exception:\n%s", p);
+
     if ((p = strcasestr(p, "Content-Length:")) != NULL)
       content_length_ = strtoul(p + 15, NULL, 10);
     else
@@ -385,7 +396,7 @@ ssize_t HttpPipe::GetHead(int fd) {
     if (*s == '\r') {
       continue;
     } else if (*s == '\n') {
-      if(i == 0) {
+      if (i == 0) {
         response_state_ = HTTP_BODY;
         break;
       }
@@ -411,42 +422,21 @@ ssize_t HttpPipe::GetBody(int fd) {
   return read(fd, &outbuf_[0], out_offset_);  // should be EOF or EAGAIN
 }
 
-void HttpPipe::ParseURL(const char *url) {
-  const char *s = strstr(url, "://");
-  int scheme = 0;  // 0 for http
-  if (s) {
-    scheme = strncasecmp(url, "http", s - url);
-    s += 3;
-  } else {
-    s = url;
-  }
-
-  switch (scheme) {
-    case 0:
-      if (sscanf(s, "%63[^:/]:%5[0-9]", host_, port_) == 1)
-        strcpy(port_, "80");
-      if (sscanf(s, "%*[^/]%1023s", path_) != 1)
-        strcpy(path_, "/");
-      break;
-    default:
-      errx(1, "unsupported scheme: %s", url);
-  }
-}
-
-void HttpPipe::SetOutput(bool transferable, struct pollfd *pfd) {
+bool HttpPipe::SetOutput(bool transferable, struct pollfd *pfd) {
   if (transferable) {
     pfd->events |= POLLOUT;
     if (pfd->fd == -1) {
       errno = 0;
       pfd->fd = TcpNonBlockConnect(host_, port_);
-      connected_ = errno == 0;
+      return pfd->fd != -1;
     }
   } else {
     pfd->events &= ~POLLOUT;
   }
+  return true;
 }
 
-void HttpPipe::HandleInput(struct pollfd *pfd) {
+bool HttpPipe::HandleInput(struct pollfd *pfd) {
   if (pfd->fd >= 0 && (pfd->revents & POLLIN)) {
     ssize_t n = ReadInput(pfd->fd);
     if (ILLEGAL(pfd->fd)) {
@@ -456,18 +446,17 @@ void HttpPipe::HandleInput(struct pollfd *pfd) {
       warnx("%s: pipe input encounter EOF", __func__);
       pfd->fd = -1;
     }
+    return true;
   }
+  return false;
 }
 
-void HttpPipe::HandleOutput(struct pollfd *pfd, int *connect_retry) {
+bool HttpPipe::HandleOutput(struct pollfd *pfd) {
   assert(header_);
-  HandleHttpResponse(pfd);
-  HandleHttpRequest(pfd);
-  if (connected_)
-    *connect_retry = 0;
+  return HandleHttpResponse(pfd) | HandleHttpRequest(pfd);
 }
 
-void HttpPipe::HandleHttpResponse(struct pollfd *pfd) {
+bool HttpPipe::HandleHttpResponse(struct pollfd *pfd) {
   if (pfd->fd >= 0 && (pfd->revents & POLLIN)) {
     bool finished;
     ssize_t n = GetResponse(pfd->fd, &finished);
@@ -482,12 +471,13 @@ void HttpPipe::HandleHttpResponse(struct pollfd *pfd) {
 
     if (n == 0 || illegal)
       RESETFD(pfd->fd);
+    return true;
   }
+  return false;
 }
 
-void HttpPipe::HandleHttpRequest(struct pollfd *pfd) {
+bool HttpPipe::HandleHttpRequest(struct pollfd *pfd) {
   if (pfd->fd >= 0 && (pfd->revents & POLLOUT)) {
-    connected_ = true;
     bool finished;
     ssize_t n = SendRequest(pfd->fd, &finished);
     if (finished)
@@ -498,10 +488,12 @@ void HttpPipe::HandleHttpRequest(struct pollfd *pfd) {
       Rollback();
       RESETFD(pfd->fd);
     }
+    return true;
   }
+  return false;
 }
 
-void HttpPipe::HandleError(struct pollfd *pfd, int *connect_retry) {
+bool HttpPipe::HandleError(struct pollfd *pfd) {
   if (pfd->fd >=0 && (pfd->revents & (POLLERR | POLLHUP))) {
     int sockerr = 0;
     socklen_t len = sizeof(sockerr);
@@ -510,23 +502,45 @@ void HttpPipe::HandleError(struct pollfd *pfd, int *connect_retry) {
     if (sockerr)
       warnx("%s: poll SO_ERROR: %s", __func__, strerror(sockerr));
 
-    if (!connected_)
-      ++*connect_retry;
-
     Rollback();
     RESETFD(pfd->fd);
+    return true;
+  }
+  return false;
+}
+
+void HttpPipe::ParseURL(const char *url) {
+  const char *s = strstr(url, "://");
+  int scheme = 0;  // 0 for http
+  if (s) {
+    scheme = strncasecmp(url, "http", s - url);
+    s += 3;
+  } else {
+    s = url;
+  }
+
+  switch (scheme) {
+    case 0:
+      if (sscanf(s, "%63[^:/]:%5[0-9]", host_, port_) == 1)
+        snprintf(port_, sizeof(port_), "80");
+      if (sscanf(s, "%*[^/]%1023s", path_) != 1)
+        snprintf(path_, sizeof(path_), "/");
+      break;
+    default:
+      errx(1, "unsupported scheme: %s", url);
   }
 }
 
 void HttpPipe::Rollback() {
   // there is no response or response error
-  if ((http_flow_ == HTTP_REQUEST && content_length_ != 0) ||
-      (http_flow_ == HTTP_RESPONSE && response_state_ == HTTP_HEAD))
-    out_offset_ = out_length_ - content_length_;
+  if (content_length_ != 0) {
+    out_offset_ = out_length_ - content_length_backup_;
+    content_length_ = 0;  // rebuild request
+  }
 
   http_flow_ = HTTP_REQUEST;
-  request_state_ = HTTP_HEAD;
+  request_state_ = response_state_ = HTTP_HEAD;
   hdr_offset_ = 0;
 }
 
-}
+}  // namespace v

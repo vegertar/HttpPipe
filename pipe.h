@@ -1,7 +1,8 @@
 // pipe.h
+// Copyright 2014 <Vegertar, vegertar@gmail.com>
 
-#ifndef _PIPE_H
-#define _PIPE_H
+#ifndef PIPE_H_
+#define PIPE_H_
 
 #include <poll.h>
 #include <stddef.h>
@@ -54,13 +55,13 @@ class HttpPipe {
   ssize_t GetResponse(int fd, bool *finished);
   ssize_t GetHead(int fd);
   ssize_t GetBody(int fd);
+  bool SetOutput(bool transferable, struct pollfd *pfd);
+  bool HandleInput(struct pollfd *pfd);
+  bool HandleOutput(struct pollfd *pfd);
+  bool HandleHttpRequest(struct pollfd *pfd);
+  bool HandleHttpResponse(struct pollfd *pfd);
+  bool HandleError(struct pollfd *pfd);
   void ParseURL(const char *url);
-  void SetOutput(bool transferable, struct pollfd *pfd);
-  void HandleInput(struct pollfd *pfd);
-  void HandleOutput(struct pollfd *pfd, int *connect_retry);
-  void HandleHttpRequest(struct pollfd *pfd);
-  void HandleHttpResponse(struct pollfd *pfd);
-  void HandleError(struct pollfd *pfd, int *connect_retry);
   void Rollback();
 
   vector<char> inbuf_;
@@ -82,12 +83,12 @@ class HttpPipe {
   size_t hdr_offset_;
   size_t hdr_length_;
   size_t content_length_;
+  size_t content_length_backup_;
 
   int infd_;
   char host_[64];
   char port_[6];
   char path_[1024];
-  bool connected_;
   HttpState request_state_;
   HttpState response_state_;
   HttpFlow http_flow_;
@@ -95,4 +96,4 @@ class HttpPipe {
 
 }  // namespace v
 
-#endif  // !_PIPE_H
+#endif  // PIPE_H_
