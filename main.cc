@@ -101,12 +101,9 @@ class PostHeader : public v::Header {
     int i = snprintf(buffer_ + content_length_offset_,
                      sizeof(buffer_) - content_length_offset_,
                      "%zu\r\n\r\n", body_size);
-    if (head_size) {
+    if (head_size)
       *head_size = content_length_offset_ + i;
-      VERBOSE(Header-Size, "%zu\n", *head_size);
-    }
 
-    VERBOSE(HTTP-POST-Header, "\n%s", buffer_);
     return buffer_;
   }
 
@@ -138,6 +135,7 @@ int main(int argc, char *argv[]) {
   pipe.SetIdleTransfer(idle_transfer_limit);
   pipe.SetTransferRate(transfer_rate);
   pipe.SetZipLevel(zip_level);
+  pipe.SetVerbose(enable_verbose);
   pipe.SetHeader(&header);
 
   pipe.SetStopFlag(&quit_program);
@@ -190,7 +188,7 @@ const char * GetMacAddress() {
     struct ifreq *it = ifc.ifc_req;
     struct ifreq *end = it + (ifc.ifc_len / sizeof(struct ifreq));
     for (; it != end; ++it) {
-      snprintf(ifr.ifr_name, IFNAMESIZ, "%s", it->ifr_name);
+      snprintf(ifr.ifr_name, IFNAMSIZ, "%s", it->ifr_name);
       if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
         if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
           if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {

@@ -41,6 +41,7 @@ class HttpPipe {
   int SetIdleTransfer(int n);
   int SetTransferRate(int n);
   int SetZipLevel(int n);
+  int SetVerbose(int n);
   Header * SetHeader(Header *p);
 
  private:
@@ -55,12 +56,12 @@ class HttpPipe {
   ssize_t GetResponse(int fd, bool *finished);
   ssize_t GetHead(int fd);
   ssize_t GetBody(int fd);
-  bool SetOutput(bool transferable, struct pollfd *pfd);
-  bool HandleInput(struct pollfd *pfd);
-  bool HandleOutput(struct pollfd *pfd);
-  bool HandleHttpRequest(struct pollfd *pfd);
-  bool HandleHttpResponse(struct pollfd *pfd);
-  bool HandleError(struct pollfd *pfd);
+  void SetOutput(bool transferable, struct pollfd *pfd);
+  void HandleInput(struct pollfd *pfd);
+  void HandleOutput(struct pollfd *pfd);
+  void HandleHttpRequest(struct pollfd *pfd);
+  void HandleHttpResponse(struct pollfd *pfd);
+  void HandleError(struct pollfd *pfd);
   void ParseURL(const char *url);
   void Rollback();
 
@@ -74,16 +75,17 @@ class HttpPipe {
   bool *stop_flag_;
   int transfer_rate_;
   int zip_level_;
+  int verbose_;
   Header *header_;
 
   size_t in_offset_;
-  size_t in_length_;  // available data to transfer
   size_t out_offset_;
-  size_t out_length_;  // data being transfer
+  size_t out_length_;  // total data to transfer
   size_t hdr_offset_;
   size_t hdr_length_;
   size_t content_length_;
   size_t content_length_backup_;
+  useconds_t milestone;
 
   int infd_;
   char host_[64];
@@ -92,6 +94,7 @@ class HttpPipe {
   HttpState request_state_;
   HttpState response_state_;
   HttpFlow http_flow_;
+  int connect_retry_n_;
 };
 
 }  // namespace v

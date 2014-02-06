@@ -8,7 +8,7 @@ ARGS =
 
 STRIP = strip
 CXX = c++
-override CFLAGS += -Wall -Werror -Wno-unused-function
+override CFLAGS += -Wall -Werror
 LDFLAGS = -lz
 
 debug: 
