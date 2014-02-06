@@ -490,15 +490,15 @@ void HttpPipe::HandleHttpRequest(struct pollfd *pfd) {
     useconds_t now = GetTime();
 
     if (n > 0) {
-      double rate = transfer_rate_ / (out_offset_ * 1E6 / (now - milestone));
-      if (rate < 1) {
+      double rate = (out_offset_ * 1E6 / (now - milestone)) / transfer_rate_;
+      if (rate > 1) {
         usleep(1000000);
         now = GetTime();
       }
 
       if (verbose_) {
-        printf("\r* Rate: %9.6f  Sent: %8zu/%zu  Speed: %8.2f K/s",
-               rate, out_offset_, out_length_,
+        printf("\r* Sent: %8zu/%zu  Speed: %8.2f K/s",
+               out_offset_, out_length_,
                out_offset_ * 1E3 / (now - milestone));
         if (finished)
           putchar('\n');
