@@ -10,7 +10,7 @@ HDRS = pipe.h
 LIBZ_DIR = zlib-1.2.8
 LIBZ = $(LIBZ_DIR)/libz.a
 
-override CXXFLAGS += -Wall -Werror
+override CXXFLAGS += -Wall -Werror -I$(LIBZ_DIR)
 
 CC = cc
 CXX = c++
