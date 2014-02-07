@@ -64,10 +64,12 @@ class HttpPipe {
   void HandleError(struct pollfd *pfd);
   void ParseURL(const char *url);
   void Rollback();
+  bool ZipCompress(vector<char> *buffer, size_t *n);
 
   vector<char> inbuf_;
-  vector<char> outbuf_;  // also for receiving http response
+  vector<char> outbuf_;
   vector<char> hdrbuf_;
+  vector<char> othbuf_;  // other buffer, for ZIP or receiving response
 
   int buffer_size_;
   int connect_retry_;
@@ -95,6 +97,7 @@ class HttpPipe {
   HttpState response_state_;
   HttpFlow http_flow_;
   int connect_retry_n_;
+  bool persistent_;
 };
 
 }  // namespace v

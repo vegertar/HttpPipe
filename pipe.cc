@@ -41,29 +41,6 @@ inline void NonBlocking(int fd, int on) {
     warn("%s: ioctl(FIONBIO, %d) error", __func__, on);
 }
 
-bool ZipCompress(int level, vector<char> *buffer, size_t *n) {
-  static vector<char> zbuffer;
-  size_t zn = max(buffer->capacity(), compressBound(*n));
-  zbuffer.reserve(zn);
-
-  int res = compress2((unsigned char *)(zbuffer.data()), &zn,
-                      (const unsigned char *)(buffer->data()), *n, level);
-  if (res == Z_OK) {
-    buffer->swap(zbuffer);
-    *n = zn;
-  } else if (res == Z_MEM_ERROR) {
-    warnx("%s: Z_MEM_ERROR: out of memory", __func__);
-  } else if (res == Z_BUF_ERROR) {
-    warnx("%s: Z_BUF_ERROR: out of room in the output buffer", __func__);
-  } else if (res == Z_STREAM_ERROR) {
-    warnx("%s: Z_STREAM_ERROR: invalid compress level", __func__);
-  } else {
-    warnx("%s: unknown error", __func__);
-  }
-
-  return res == Z_OK;
-}
-
 int TcpNonBlockConnect(const char *host, const char *serv) {
   int s, rv;
   struct addrinfo hints, *servinfo, *p;
@@ -127,7 +104,8 @@ HttpPipe::HttpPipe()
       request_state_(HTTP_HEAD),
       response_state_(HTTP_HEAD),
       http_flow_(HTTP_REQUEST),
-      connect_retry_n_(0) {
+      connect_retry_n_(0),
+      persistent_(false) {
   // empty
 }
 
@@ -140,6 +118,7 @@ void HttpPipe::Init(int infd, const char *outurl) {
   inbuf_.reserve(buffer_size_);
   outbuf_.reserve(buffer_size_);
   hdrbuf_.reserve(MAX_QUERY);
+  othbuf_.reserve(MAX_QUERY);
 }
 
 void HttpPipe::Serve(int timeout) {
@@ -291,8 +270,7 @@ ssize_t HttpPipe::SendRequest(int fd, bool *finished) {
   if (content_length_ == 0) {
     if (zip_level_ > 0) {
       ssize_t save = n;
-      header_->SetField("LETV-ZIP",
-                        ZipCompress(zip_level_, &outbuf_, &n) ? "1" : NULL);
+      header_->SetField("LETV-ZIP", ZipCompress(&outbuf_, &n) ? "1" : NULL);
       out_length_ -= save - n;
     }
 
@@ -300,6 +278,7 @@ ssize_t HttpPipe::SendRequest(int fd, bool *finished) {
              header_->Generate(n, &hdr_length_));
     hdr_offset_ = 0;
     content_length_backup_ = content_length_ = n;
+    persistent_ = true;
 
     if (verbose_)
       printf("> HTTP-Request-Header:\n%s", hdrbuf_.data());
@@ -362,7 +341,7 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
     if (res <= 0)
       goto finish;
 
-    const char *p = hdrbuf_.data();
+    const char *p = othbuf_.data();
 
     if (verbose_)
       printf("< HTTP-Response-Header:\n%s\r\n", p);
@@ -371,10 +350,16 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
     if (sscanf(p, "%*s%d", &status) == 1 && status / 100 != 2)
       warnx("HTTP response exception: %d", status);
 
-    if ((p = strcasestr(p, "Content-Length:")) != NULL)
+    if ((p = strcasestr(othbuf_.data(), "Content-Length:")) != NULL)
       content_length_ = strtoul(p + 15, NULL, 10);
     else
       content_length_ = 0;
+
+    if ((p = strcasestr(othbuf_.data(), "Connection:")) != NULL) {
+      char token[8];
+      if (sscanf(p + 11, " %s", token) == 1 && strcasecmp(token, "close") == 0)
+        persistent_ = false;
+    }
   }
 
   assert(response_state_ == HTTP_BODY);
@@ -384,6 +369,7 @@ finish:
   if (res == 0 || ILLEGAL(res) ||
       (response_state_ == HTTP_BODY && content_length_ == 0)) {
     response_state_ = HTTP_HEAD;
+    hdr_offset_ = 0;
     *finished = true;
   } else {
     *finished = false;
@@ -413,9 +399,9 @@ ssize_t HttpPipe::GetHead(int fd) {
       ++i;
     }
 
-    if (hdr_offset_ + 2 <= hdrbuf_.capacity()) {
-      hdrbuf_[hdr_offset_++] = *s;
-      hdrbuf_[hdr_offset_] = 0;
+    if (hdr_offset_ + 2 <= othbuf_.capacity()) {
+      othbuf_[hdr_offset_++] = *s;
+      othbuf_[hdr_offset_] = 0;
     }
   }
   return res;
@@ -424,10 +410,10 @@ ssize_t HttpPipe::GetHead(int fd) {
 ssize_t HttpPipe::GetBody(int fd) {
   ssize_t n;
   while (content_length_ > 0 &&
-         (n = read(fd, &outbuf_[0], out_offset_)) > 0)
+         (n = read(fd, &othbuf_[0], othbuf_.capacity())) > 0)
     content_length_ -= n;
 
-  return read(fd, &outbuf_[0], out_offset_);  // should be EOF or EAGAIN
+  return read(fd, &othbuf_[0], othbuf_.capacity());  // should be EOF or EAGAIN
 }
 
 void HttpPipe::SetOutput(bool transferable, struct pollfd *pfd) {
@@ -476,7 +462,7 @@ void HttpPipe::HandleHttpResponse(struct pollfd *pfd) {
       Rollback();
     }
 
-    if (n == 0 || illegal)
+    if (n == 0 || illegal || !persistent_)
       RESETFD(pfd->fd);
   }
 }
@@ -560,20 +546,43 @@ void HttpPipe::Rollback() {
   // there is no response or response error
   if (content_length_ != 0) {
     if (verbose_)
-      printf("* Rolling back: %s, %zu, %zu\n",
+      printf("* Rolling back: %s, %zu/%zu\n",
              http_flow_ ?
                (response_state_ ? "HTTP_RESPONSE, HTTP_BODY" :
                 "HTTP_RESPONSE, HTTP_HEAD") :
                (request_state_ ? "HTTP_REQUEST, HTTP_BODY" :
                 "HTTP_REQUEST, HTTP_HEAD"),
-             hdr_length_, content_length_);
+             out_offset_, content_length_);
 
     out_offset_ = out_length_ - content_length_backup_;
-    content_length_ = 0;  // rebuild request
+    content_length_ = content_length_backup_;
+    hdr_offset_ = 0;
+    persistent_ = true;
     http_flow_ = HTTP_REQUEST;
     request_state_ = response_state_ = HTTP_HEAD;
-    hdr_offset_ = 0;
   }
+}
+
+bool HttpPipe::ZipCompress(vector<char> *buffer, size_t *n) {
+  size_t zn = max(buffer->capacity(), compressBound(*n));
+  othbuf_.reserve(zn);
+
+  int res = compress2((unsigned char *)(othbuf_.data()), &zn,
+                      (const unsigned char *)(buffer->data()), *n, zip_level_);
+  if (res == Z_OK) {
+    buffer->swap(othbuf_);
+    *n = zn;
+  } else if (res == Z_MEM_ERROR) {
+    warnx("%s: Z_MEM_ERROR: out of memory", __func__);
+  } else if (res == Z_BUF_ERROR) {
+    warnx("%s: Z_BUF_ERROR: out of room in the output buffer", __func__);
+  } else if (res == Z_STREAM_ERROR) {
+    warnx("%s: Z_STREAM_ERROR: invalid compress level", __func__);
+  } else {
+    warnx("%s: unknown error", __func__);
+  }
+
+  return res == Z_OK;
 }
 
 }  // namespace v
