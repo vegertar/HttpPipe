@@ -10,7 +10,7 @@ HDRS = pipe.h
 LIBZ_DIR = zlib-1.2.8
 LIBZ = $(LIBZ_DIR)/libz.a
 
-override CFLAGS += -Wall -Werror
+override CXXFLAGS += -Wall -Werror
 
 CC = cc
 CXX = c++
@@ -23,10 +23,10 @@ ifeq ($(arm), yes)
 endif
 
 debug: 
-	$(MAKE) CFLAGS="-g -fno-inline -O0" build
+	$(MAKE) CXXFLAGS="-g -fno-inline -O0" build
 
 release:
-	$(MAKE) CFLAGS="-DNDEBUG -O2" build
+	$(MAKE) CXXFLAGS="-DNDEBUG -O2" build
 	$(STRIP) $(TARGET)
 
 $(LIBZ): $(LIBZ_DIR)/Makefile
@@ -48,6 +48,6 @@ $(TARGET): $(SRCS:.cc=.o) $(LIBZ)
 	$(CXX) -o $@ $^
 
 %.o: %.cc $(HDRS)
-	$(CXX) $(CFLAGS) -c $<
+	$(CXX) $(CXXFLAGS) -c $<
 
 .PHONY: debug release build clean run
