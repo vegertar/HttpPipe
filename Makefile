@@ -15,11 +15,13 @@ override CXXFLAGS += -Wall -Werror -I$(LIBZ_DIR)
 CC = cc
 CXX = c++
 STRIP = strip
+LDFLAGS = 
 
 ifeq ($(arm), yes)
 	CC = arm-linux-gnueabi-gcc 
 	CXX = arm-linux-gnueabi-g++ 
 	STRIP = arm-linux-gnueabi-strip
+	LDFLAGS = 
 endif
 
 debug: 
@@ -28,12 +30,6 @@ debug:
 release:
 	$(MAKE) CXXFLAGS="-DNDEBUG -O2" build
 	$(STRIP) $(TARGET)
-
-$(LIBZ): $(LIBZ_DIR)/Makefile
-	$(MAKE) -C $(LIBZ_DIR) CC=$(CC)
-
-$(LIBZ_DIR)/Makefile:
-	cd $(LIBZ_DIR) && ./configure --static
 
 build: $(TARGET)
 
@@ -45,7 +41,13 @@ run:
 	./$(TARGET) -V -d $(url) $(args)
 
 $(TARGET): $(SRCS:.cc=.o) $(LIBZ)
-	$(CXX) -o $@ $^
+	$(CXX) -o $@ $^ $(LDFLAGS)
+
+$(LIBZ): $(LIBZ_DIR)/Makefile
+	$(MAKE) -C $(LIBZ_DIR) CC=$(CC)
+
+$(LIBZ_DIR)/Makefile:
+	cd $(LIBZ_DIR) && ./configure --static
 
 %.o: %.cc $(HDRS)
 	$(CXX) $(CXXFLAGS) -c $<
