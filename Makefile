@@ -38,7 +38,7 @@ $(LIBZ_DIR)/Makefile:
 build: $(TARGET)
 
 clean:
-	-rm $(TARGET) *.o
+	-rm -f $(TARGET) *.o
 	$(MAKE) -C $(LIBZ_DIR) clean
 
 run:
