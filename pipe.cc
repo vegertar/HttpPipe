@@ -564,7 +564,7 @@ void HttpPipe::Rollback() {
 }
 
 bool HttpPipe::ZipCompress(vector<char> *buffer, size_t *n) {
-  size_t zn = max(buffer->capacity(), compressBound(*n));
+  uLongf zn = max<uLongf>(buffer->capacity(), compressBound(*n));
   othbuf_.reserve(zn);
 
   int res = compress2((unsigned char *)(othbuf_.data()), &zn,
