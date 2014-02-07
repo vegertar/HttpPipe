@@ -18,6 +18,7 @@
 #endif
 #include <sys/ioctl.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <string>
 #include "pipe.h"
 
@@ -219,6 +220,8 @@ const char * GetMacAddress() {
         }
       }
       freeifaddrs(ifap);
+    } else {
+      err(1, "%s: getifaddrs error", __func__);
     }
 #endif
   }
