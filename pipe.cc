@@ -462,7 +462,7 @@ void HttpPipe::HandleHttpResponse(struct pollfd *pfd) {
       Rollback();
     }
 
-    if (n == 0 || illegal || !persistent_)
+    if (n == 0 || illegal || (finished && !persistent_))
       RESETFD(pfd->fd);
   }
 }
