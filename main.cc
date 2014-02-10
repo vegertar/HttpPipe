@@ -10,7 +10,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <getopt.h>
+#ifndef __ANDROID__
 #include <ifaddrs.h>
+#endif
 #include <netdb.h>
 #include <net/if.h>
 #ifdef __APPLE__
@@ -37,11 +39,12 @@ const char *version = "0.0.1";
 bool quit_program;
 bool enable_verbose;
 char destination[1024];                // destination URL
-size_t buffer_size = 2048 * 1024;      // 2 MB
-size_t transfer_rate = 100000;         // 100 Kbps
+size_t buffer_size = 1024 * 1024;      // 1 MB
+size_t transfer_rate = 12500;          // 100 Kbps
 size_t connect_retry = 3;              // 3 times
 size_t idle_transfer_interval = 300;   // 5 minutes
-size_t idle_transfer_limit = 3;        // 3 times
+size_t idle_transfer_idle_limit = 1;   // 1 time
+size_t idle_transfer_busy_limit = 3;   // 3 times
 size_t zip_level = 0;                  // disable
 
 inline void Usage();
@@ -133,7 +136,8 @@ int main(int argc, char *argv[]) {
   pipe.Init(STDIN_FILENO, destination);
   pipe.SetBufferSize(buffer_size);
   pipe.SetConnectRetry(connect_retry);
-  pipe.SetIdleTransfer(idle_transfer_limit);
+  pipe.SetIdleTransfer(idle_transfer_idle_limit);
+  pipe.SetBusyTransfer(idle_transfer_busy_limit);
   pipe.SetTransferRate(transfer_rate);
   pipe.SetZipLevel(zip_level);
   pipe.SetVerbose(enable_verbose);
@@ -158,8 +162,9 @@ inline void Usage() {
          "  -s BUFSIZ      The buffer size, default 2 MB\n"
          "  -r RATE        Transfer rate, default 100 K/s\n"
          "  -n TRY         Failed connect try, default 3 times\n"
-         "  -i INTERVAL    Transfer interval in idle, default 5 minutes\n"
-         "  -l LIMIT       Limit to transfer occur in idle, default 3 times\n",
+         "  -i INTERVAL    Transfer interval, default 5 minutes\n"
+         "  -l LIMIT       Limit to transfer occur in idle, default 1 times\n"
+         "  -L LIMIT       Limit to transfer occur in busy, default 3 times\n",
          program);
   exit(0);
 }
@@ -281,7 +286,7 @@ size_t ParseRate(const char *s) {
       errx(1, "Invalid argument: %s, [0-9]+[kKmM] expect.", s);
   }
 
-  return value;
+  return value / 8;
 }
 
 size_t ParseInterval(const char *s) {
@@ -315,7 +320,7 @@ size_t ParseInterval(const char *s) {
 
 void ParseOptions(int argc, char *argv[]) {
   int opt;
-  while ((opt = getopt(argc, argv, "Vhvd:c:s:r:n:i:l:")) != -1) {
+  while ((opt = getopt(argc, argv, "Vhvd:c:s:r:n:i:l:L:")) != -1) {
     switch (opt) {
       case 'V':
         enable_verbose = true;
@@ -354,7 +359,11 @@ void ParseOptions(int argc, char *argv[]) {
         break;
 
       case 'l':
-        idle_transfer_limit = atoi(optarg);
+        idle_transfer_idle_limit = atoi(optarg);
+        break;
+
+      case 'L':
+        idle_transfer_busy_limit = atoi(optarg);
         break;
     }
   }
@@ -368,7 +377,8 @@ void ParseOptions(int argc, char *argv[]) {
   VERBOSE(Transfer-Rate, "%zu(bytes/s)\n", transfer_rate);
   VERBOSE(Connect-Retry, "%zu(times)\n", connect_retry);
   VERBOSE(Idle-Transfer-Interval, "%zu(sec)\n", idle_transfer_interval);
-  VERBOSE(Idle-Transfer-Limit, "%zu(times)\n", idle_transfer_limit);
+  VERBOSE(Idle-Transfer-Idle-Limit, "%zu(times)\n", idle_transfer_idle_limit);
+  VERBOSE(Idle-Transfer-Busy-Limit, "%zu(times)\n", idle_transfer_busy_limit);
 }
 
 void SignalHandler(int signo) {

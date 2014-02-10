@@ -81,11 +81,12 @@ int TcpNonBlockConnect(const char *host, const char *serv) {
 namespace v {
 
 HttpPipe::HttpPipe()
-    : buffer_size_(2097152),  // 2M
+    : buffer_size_(1048576),  // 1M
       connect_retry_(3),
-      idle_transfer_(3),
+      idle_transfer_(1),
+      busy_transfer_(3),
       stop_flag_(NULL),
-      transfer_rate_(100000),  // 100K
+      transfer_rate_(12500),  // 100Kb
       zip_level_(0),  // disable
       verbose_(0),  // disable
       header_(NULL),
@@ -114,11 +115,6 @@ void HttpPipe::Init(int infd, const char *outurl) {
     infd_ = infd;
   if (outurl)
     ParseURL(outurl);
-
-  inbuf_.reserve(buffer_size_);
-  outbuf_.reserve(buffer_size_);
-  hdrbuf_.reserve(MAX_QUERY);
-  othbuf_.reserve(MAX_QUERY);
 }
 
 void HttpPipe::Serve(int timeout) {
@@ -127,8 +123,15 @@ void HttpPipe::Serve(int timeout) {
   };
 
   int idle = 0;
+  int busy = 0;
   int delay = 0;
   int interval = timeout;
+
+  inbuf_.reserve(buffer_size_);
+  outbuf_.reserve(buffer_size_);
+  hdrbuf_.reserve(MAX_QUERY);
+  othbuf_.reserve(MAX_QUERY);
+  header_->SetRequest("POST", path_, "HTTP/1.1");
 
   milestone = GetTime();
 
@@ -136,7 +139,7 @@ void HttpPipe::Serve(int timeout) {
     if (connect_retry_n_ > connect_retry_)
       break;
 
-    int status = CheckTransfer(&idle);
+    int status = CheckTransfer(&idle, &busy);
     if (status == -1 && fds[0].fd == -1)
       break;
 
@@ -147,6 +150,7 @@ void HttpPipe::Serve(int timeout) {
 
     if (res == 0) {
       idle = 0;
+      busy = 0;
       Rollback();
     } else if (res < 0 && errno != EINTR) {
       err(1, "%s: poll() error", __func__);
@@ -168,11 +172,8 @@ void HttpPipe::Serve(int timeout) {
 
 int HttpPipe::SetBufferSize(int n) {
   int old = buffer_size_;
-  if (n >= 0) {
-    inbuf_.reserve(n);
-    outbuf_.reserve(n);
+  if (n >= 0)
     buffer_size_ = n;
-  }
   return old;
 }
 
@@ -187,6 +188,13 @@ int HttpPipe::SetIdleTransfer(int n) {
   int old = idle_transfer_;
   if (n >= 0)
     idle_transfer_ = n;
+  return old;
+}
+
+int HttpPipe::SetBusyTransfer(int n) {
+  int old = busy_transfer_;
+  if (n >= 0)
+    busy_transfer_ = n;
   return old;
 }
 
@@ -220,14 +228,12 @@ int HttpPipe::SetVerbose(int n) {
 
 Header * HttpPipe::SetHeader(Header *p) {
   Header *old = header_;
-  if (p) {
-    p->SetRequest("POST", path_, "HTTP/1.1");
+  if (p)
     header_ = p;
-  }
   return old;
 }
 
-int HttpPipe::CheckTransfer(int *idle_transfer_n) {
+int HttpPipe::CheckTransfer(int *idle_transfer_n, int *busy_transfer_n) {
   if (in_offset_ == 0 &&
       out_length_ == out_offset_ &&
       http_flow_ == HTTP_REQUEST)
@@ -239,8 +245,10 @@ int HttpPipe::CheckTransfer(int *idle_transfer_n) {
   if (out_length_ > out_offset_)
     return 1;
 
-  if (in_offset_ == inbuf_.capacity() ||
-      (in_offset_ > 0 && (*idle_transfer_n)++ < idle_transfer_)) {
+  if ((0 < in_offset_ && in_offset_ < (size_t)buffer_size_ &&  // idle
+       (*idle_transfer_n)++ < idle_transfer_) ||
+      (in_offset_ >= (size_t)buffer_size_ &&                   // busy
+       (*busy_transfer_n)++ < busy_transfer_)) {
     inbuf_.swap(outbuf_);
     out_length_ = in_offset_;
     in_offset_ = 0;
@@ -252,12 +260,12 @@ int HttpPipe::CheckTransfer(int *idle_transfer_n) {
 }
 
 ssize_t HttpPipe::ReadInput(int fd) {
-  if (in_offset_ == inbuf_.capacity()) {
+  if (in_offset_ == (size_t)buffer_size_) {
     warnx("input OVERFLOW, overwriting.");
     in_offset_ = 0;  // overwrite
   }
 
-  ssize_t n = read(fd, &inbuf_[in_offset_], inbuf_.capacity() - in_offset_);
+  ssize_t n = read(fd, &inbuf_[in_offset_], buffer_size_ - in_offset_);
   if (n > 0)
     in_offset_ += n;
   return n;
@@ -430,7 +438,7 @@ void HttpPipe::SetOutput(bool transferable, struct pollfd *pfd) {
 }
 
 void HttpPipe::HandleInput(struct pollfd *pfd) {
-  if (pfd->fd >= 0 && (pfd->revents & POLLIN)) {
+  if (pfd->fd >= 0 && (pfd->revents & (POLLIN | POLLHUP))) {
     ssize_t n = ReadInput(pfd->fd);
     if (ILLEGAL(pfd->fd)) {
       warn("%s: ReadInput error", __func__);
@@ -485,7 +493,7 @@ void HttpPipe::HandleHttpRequest(struct pollfd *pfd) {
       if (verbose_) {
         printf("\r* Sent: %8zu/%zu  Speed: %8.2f K/s",
                out_offset_, out_length_,
-               out_offset_ * 1E3 / (now - milestone));
+               out_offset_ * 1E3 / (now - milestone) * 8);
         if (finished)
           putchar('\n');
         fflush(stdout);

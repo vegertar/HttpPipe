@@ -11,6 +11,32 @@
 
 #define MAX_QUERY  2048
 
+#ifdef __ANDROID__
+
+#define err(ret, ...) do { \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, ": %s\n", strerror(errno)); \
+  exit(ret); \
+} while (0)
+
+#define errx(ret, ...) do { \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "\n"); \
+  exit(ret); \
+} while (0)
+
+#define warn(...) do { \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, ": %s\n", strerror(errno)); \
+} while (0)
+
+#define warnx(...) do { \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "\n"); \
+} while (0)
+
+#endif  // __ANDROID__
+
 namespace v {
 
 using std::vector;
@@ -39,6 +65,7 @@ class HttpPipe {
   int SetConnectRetry(int n);
   bool * SetStopFlag(bool *p);
   int SetIdleTransfer(int n);
+  int SetBusyTransfer(int n);
   int SetTransferRate(int n);
   int SetZipLevel(int n);
   int SetVerbose(int n);
@@ -48,7 +75,7 @@ class HttpPipe {
   enum HttpState { HTTP_HEAD, HTTP_BODY };
   enum HttpFlow { HTTP_REQUEST, HTTP_RESPONSE };
 
-  int CheckTransfer(int *idle_transfer_n);
+  int CheckTransfer(int *idle_transfer_n, int *busy_transfer_n);
   ssize_t ReadInput(int fd);
   ssize_t SendRequest(int fd, bool *finished);
   ssize_t SendHead(int fd, size_t n);
@@ -74,6 +101,7 @@ class HttpPipe {
   int buffer_size_;
   int connect_retry_;
   int idle_transfer_;
+  int busy_transfer_;
   bool *stop_flag_;
   int transfer_rate_;
   int zip_level_;

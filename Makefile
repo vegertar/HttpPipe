@@ -18,9 +18,9 @@ STRIP = strip
 LDFLAGS = 
 
 ifeq ($(arm), yes)
-	CC = arm-linux-gnueabi-gcc 
-	CXX = arm-linux-gnueabi-g++ 
-	STRIP = arm-linux-gnueabi-strip
+	CC = arm-linux-androideabi-gcc 
+	CXX = arm-linux-androideabi-g++ 
+	STRIP = arm-linux-androideabi-strip
 	LDFLAGS = 
 endif
 
