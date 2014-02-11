@@ -132,6 +132,7 @@ void HttpPipe::Serve(int timeout) {
   hdrbuf_.reserve(MAX_QUERY);
   othbuf_.reserve(MAX_QUERY);
   header_->SetRequest("POST", path_, "HTTP/1.1");
+  header_->SetField("Host", host_);
 
   milestone = GetTime();
 
@@ -365,7 +366,7 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
 
     if ((p = strcasestr(othbuf_.data(), "Connection:")) != NULL) {
       char token[8];
-      if (sscanf(p + 11, " %s", token) == 1 && strcasecmp(token, "close") == 0)
+      if (sscanf(p + 11, " %7s", token) == 1 && strcasecmp(token, "close") == 0)
         persistent_ = false;
     }
   }

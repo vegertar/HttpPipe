@@ -62,6 +62,7 @@ class PostHeader : public v::Header {
       : mac_(NULL),
         path_(NULL),
         compressed_(false),
+        host_(),
         buffer_(),
         content_length_offset_(0) {
     // empty
@@ -75,9 +76,11 @@ class PostHeader : public v::Header {
   }
 
   void SetField(const char *field, const char *value) {
-    if (strcmp(field, "LETV-TV-MAC") == 0 && !mac_) {
+    if (strcasecmp(field, "Host") == 0) {
+      snprintf(host_, sizeof(host_), "%s", value);
+    } else if (strcasecmp(field, "LETV-TV-MAC") == 0 && !mac_) {
       mac_ = value;
-    } else if (strcmp(field, "LETV-ZIP") == 0) {
+    } else if (strcasecmp(field, "LETV-ZIP") == 0) {
       bool t = value != NULL;
       if (compressed_ != t) {
         content_length_offset_ = 0;
@@ -91,6 +94,7 @@ class PostHeader : public v::Header {
   const char * Generate(size_t body_size, size_t *head_size) {
     if (!content_length_offset_) {
       const char *pattern = "POST %s HTTP/1.1\r\n"
+                            "Host: %s\r\n"
                             "Accept: */*\r\n"
                             "LETV-TV-MAC: %s\r\n"
                             "%s"                  // LETV-ZIP: 1\r\n
@@ -98,6 +102,7 @@ class PostHeader : public v::Header {
       content_length_offset_ = snprintf(buffer_, sizeof(buffer_),
                                         pattern,
                                         path_,
+                                        host_,
                                         mac_,
                                         compressed_ ? "LETV-ZIP: 1\r\n" : "");
     }
@@ -115,7 +120,8 @@ class PostHeader : public v::Header {
   const char *mac_;
   const char *path_;
   bool compressed_;
-  char buffer_[128];
+  char host_[64];
+  char buffer_[2048];
   int content_length_offset_;
 };
 
