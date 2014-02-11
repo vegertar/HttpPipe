@@ -366,7 +366,8 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
 
     if ((p = strcasestr(othbuf_.data(), "Connection:")) != NULL) {
       char token[8];
-      if (sscanf(p + 11, " %7s", token) == 1 && strcasecmp(token, "close") == 0)
+      if (sscanf(p + 11, " %7[^\r]", token) == 1 &&
+          strcasecmp(token, "close") == 0)
         persistent_ = false;
     }
   }
