@@ -126,13 +126,15 @@ void HttpPipe::Serve(int timeout) {
   int busy = 0;
   int delay = 0;
   int interval = timeout;
+  char host_field[70] = "";
+  snprintf(host_field, sizeof(host_field), "%s:%s", host_, port_);
 
   inbuf_.reserve(buffer_size_);
   outbuf_.reserve(buffer_size_);
   hdrbuf_.reserve(MAX_QUERY);
   othbuf_.reserve(MAX_QUERY);
   header_->SetRequest("POST", path_, "HTTP/1.1");
-  header_->SetField("Host", host_);
+  header_->SetField("Host", host_field);
 
   milestone = GetTime();
 
@@ -287,7 +289,6 @@ ssize_t HttpPipe::SendRequest(int fd, bool *finished) {
              header_->Generate(n, &hdr_length_));
     hdr_offset_ = 0;
     content_length_backup_ = content_length_ = n;
-    persistent_ = true;
 
     if (verbose_)
       printf("> HTTP-Request-Header:\n%s", hdrbuf_.data());
@@ -364,6 +365,7 @@ ssize_t HttpPipe::GetResponse(int fd, bool *finished) {
     else
       content_length_ = 0;
 
+    persistent_ = true;
     if ((p = strcasestr(othbuf_.data(), "Connection:")) != NULL) {
       char token[8];
       if (sscanf(p + 11, " %7[^\r]", token) == 1 &&
@@ -567,7 +569,6 @@ void HttpPipe::Rollback() {
     out_offset_ = out_length_ - content_length_backup_;
     content_length_ = content_length_backup_;
     hdr_offset_ = 0;
-    persistent_ = true;
     http_flow_ = HTTP_REQUEST;
     request_state_ = response_state_ = HTTP_HEAD;
   }

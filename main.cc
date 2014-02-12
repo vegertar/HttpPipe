@@ -21,7 +21,6 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <string>
 #include "pipe.h"
 
 #define VERBOSE(field, ...) do { \
@@ -31,13 +30,12 @@
 
 namespace {
 
-using std::string;
-
 const char *program = "pipe";
 const char *version = "0.0.1";
 
 bool quit_program;
 bool enable_verbose;
+bool short_transaction;
 char destination[1024];                // destination URL
 size_t buffer_size = 1024 * 1024;      // 1 MB
 size_t transfer_rate = 12500;          // 100 Kbps
@@ -62,6 +60,7 @@ class PostHeader : public v::Header {
       : mac_(NULL),
         path_(NULL),
         compressed_(false),
+        persistent_(true),
         host_(),
         buffer_(),
         content_length_offset_(0) {
@@ -86,6 +85,12 @@ class PostHeader : public v::Header {
         content_length_offset_ = 0;
         compressed_ = t;
       }
+    } else if (strcasecmp(field, "Connection") == 0) {
+      bool t = strcasecmp(value, "close");  // i.e. keep-alive
+      if (persistent_ != t) {
+        content_length_offset_ = 0;
+        persistent_ = t;
+      }
     } else {
       assert(false);
     }
@@ -95,16 +100,20 @@ class PostHeader : public v::Header {
     if (!content_length_offset_) {
       const char *pattern = "POST %s HTTP/1.1\r\n"
                             "Host: %s\r\n"
+                            "User-Agent: %s/%s\r\n"
                             "Accept: */*\r\n"
                             "LETV-TV-MAC: %s\r\n"
                             "%s"                  // LETV-ZIP: 1\r\n
+                            "%s"                  // Connection: close\r\n
                             "Content-Length: ";
       content_length_offset_ = snprintf(buffer_, sizeof(buffer_),
                                         pattern,
                                         path_,
                                         host_,
+                                        program, version,
                                         mac_,
-                                        compressed_ ? "LETV-ZIP: 1\r\n" : "");
+                                        compressed_ ? "LETV-ZIP: 1\r\n" : "",
+                                        persistent_ ? "" : "Connection: close\r\n");
     }
 
     int i = snprintf(buffer_ + content_length_offset_,
@@ -120,6 +129,7 @@ class PostHeader : public v::Header {
   const char *mac_;
   const char *path_;
   bool compressed_;
+  bool persistent_;
   char host_[64];
   char buffer_[2048];
   int content_length_offset_;
@@ -137,6 +147,8 @@ int main(int argc, char *argv[]) {
 
   PostHeader header;
   header.SetField("LETV-TV-MAC", GetMacAddress());
+  if (short_transaction)
+    header.SetField("Connection", "close");
 
   v::HttpPipe pipe;
   pipe.Init(STDIN_FILENO, destination);
@@ -163,6 +175,7 @@ inline void Usage() {
          "  -V             Enable verbose output\n"
          "  -h             Print this help and exit\n"
          "  -v             Print program version and exit\n"
+         "  -S             Use short connection\n"
          "  -d DEST        Pipe destination URL\n"
          "  -c LEVEL       Enable ZIP compress (1~9)\n"
          "  -s BUFSIZ      The buffer size, default 2 MB\n"
@@ -326,7 +339,7 @@ size_t ParseInterval(const char *s) {
 
 void ParseOptions(int argc, char *argv[]) {
   int opt;
-  while ((opt = getopt(argc, argv, "Vhvd:c:s:r:n:i:l:L:")) != -1) {
+  while ((opt = getopt(argc, argv, "VhvSd:c:s:r:n:i:l:L:")) != -1) {
     switch (opt) {
       case 'V':
         enable_verbose = true;
@@ -338,6 +351,10 @@ void ParseOptions(int argc, char *argv[]) {
 
       case 'v':
         Version();
+        break;
+
+      case 'S':
+        short_transaction = true;
         break;
 
       case 'd':
@@ -371,12 +388,16 @@ void ParseOptions(int argc, char *argv[]) {
       case 'L':
         idle_transfer_busy_limit = atoi(optarg);
         break;
+
+      default:
+        exit(1);
     }
   }
 
   if (!destination[0])
     errx(1, "missing destination, expect an URL");
 
+  VERBOSE(Short-Transaction, "%d\n", short_transaction);
   VERBOSE(Zip-Level, "%zu\n", zip_level);
   VERBOSE(Destination, "%s\n", destination);
   VERBOSE(Buffer-Size, "%zu(bytes)\n", buffer_size);
