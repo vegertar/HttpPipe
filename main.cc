@@ -178,7 +178,7 @@ inline void Usage() {
          "  -S             Use short connection\n"
          "  -d DEST        Pipe destination URL\n"
          "  -c LEVEL       Enable ZIP compress (1~9)\n"
-         "  -s BUFSIZ      The buffer size, default 2 MB\n"
+         "  -s BUFSIZ      The buffer size, default 1 MB\n"
          "  -r RATE        Transfer rate, default 100 K/s\n"
          "  -n TRY         Failed connect try, default 3 times\n"
          "  -i INTERVAL    Transfer interval, default 5 minutes\n"
