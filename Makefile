@@ -18,6 +18,8 @@ STRIP = strip
 LDFLAGS = 
 
 ifeq ($(arm), yes)
+	AR = arm-linux-androideabi-ar
+	RANLIB = arm-linux-androideabi-ranlib
 	CC = arm-linux-androideabi-gcc 
 	CXX = arm-linux-androideabi-g++ 
 	STRIP = arm-linux-androideabi-strip
@@ -25,10 +27,10 @@ ifeq ($(arm), yes)
 endif
 
 debug: 
-	$(MAKE) CXXFLAGS="-g -fno-inline -O0" build
+	$(MAKE) CXXFLAGS="-g -fno-inline -O0" AR=$(AR) RANLIB=$(RANLIB) build
 
 release:
-	$(MAKE) CXXFLAGS="-DNDEBUG -O2" build
+	$(MAKE) CXXFLAGS="-DNDEBUG -O2" AR=$(AR) RANLIB=$(RANLIB) build
 	$(STRIP) $(TARGET)
 
 build: $(TARGET)
